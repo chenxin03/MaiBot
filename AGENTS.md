@@ -91,3 +91,15 @@ https://github.com/Mai-with-u/plugin-repo/blob/main/CONTRIBUTING.md
 不用修改changelog.dev，改动应该都写changelog.md
 一般不写入changelog的内容：
 版本号提升或更新项目依赖
+
+# 上游同步与自定义开发（fork 工作流）
+本仓库是 `Mai-with-u/MaiBot` 的 fork：`origin` 指向自己的 fork，`upstream` 指向主仓库。
+
+1. `main` 只作为上游镜像，不在这里提交任何自定义改动。同步上游用 `git sync-upstream`（fetch upstream → main 快进到 upstream/main → 推送到 origin）。
+2. 自定义改动一律提交在 `custom` 分支。上游更新后执行 `git rebase-custom`（切到 custom 并 rebase 到 upstream/main），解决冲突后 `git push --force-with-lease origin custom`。
+3. 基线默认取 `upstream/main`（稳定发布版）；只有需要预览未发布功能时才临时以 `upstream/dev` 为基线。
+4. 想让某个改动进入上游，要从最新的 `upstream/main` 单独拉分支提交 PR，不要夹在 custom 的提交里，也不要把 fork 的提交直接推到 upstream。
+5. 自定义改动尽量少而集中，优先走插件、配置模板、独立模块，少改上游核心文件。已开启 `rerere`，重复出现的冲突会自动套用上次的解法。
+6. 每次同步后执行 `uv sync`（`uv.lock` 变动频繁）；改动涉及 dashboard 时重新安装依赖并 `npm run build`。
+7. 网络走法：`origin` 用 GitHub 直连、`upstream` 走 gh-proxy；直连异常时用 `git remote set-url <remote> https://gh-proxy.org/https://github.com/<owner>/<repo>.git` 切回代理。
+8. 本文件这段 fork 工作流说明本身就是 `custom` 分支上的一处自定义改动，与上游的差异属正常，不要当作待清理的改动删掉。
