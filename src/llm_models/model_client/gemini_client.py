@@ -116,6 +116,26 @@ THINKING_BUDGET_AUTO = -1
 THINKING_BUDGET_DISABLED = 0
 """禁用思考预算模式。仅部分模型支持。"""
 
+THINKING_LEVEL_ONLY_MODEL_PREFIXES: Tuple[str, ...] = ("gemini-4",)
+"""只接受 thinking_level、拒绝 thinking_budget 的模型前缀。"""
+
+
+def _requires_thinking_level(model_identifier: str) -> bool:
+    """判断模型是否只接受 thinking_level 而不接受 thinking_budget。
+
+    Args:
+        model_identifier: 模型标识，可带 publisher 前缀。
+
+    Returns:
+        bool: 需要使用 thinking_level 时返回 True。
+    """
+    normalized_identifier = model_identifier.rsplit("/", 1)[-1]
+    return any(
+        normalized_identifier == prefix or normalized_identifier.startswith(f"{prefix}-")
+        for prefix in THINKING_LEVEL_ONLY_MODEL_PREFIXES
+    )
+
+
 GEMINI_SAFE_SETTINGS: List[SafetySetting] = [
     SafetySetting(category=HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=HarmBlockThreshold.BLOCK_NONE),
     SafetySetting(category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=HarmBlockThreshold.BLOCK_NONE),
@@ -917,10 +937,29 @@ class GeminiClient(AdapterClient[AsyncIterator[GenerateContentResponse], Generat
         if "safety_settings" not in config_payload:
             config_payload["safety_settings"] = GEMINI_SAFE_SETTINGS
         if "thinking_config" not in config_payload:
-            config_payload["thinking_config"] = ThinkingConfig(
-                include_thoughts=bool(extra_params.get("include_thoughts", True)),
-                thinking_budget=self.clamp_thinking_budget(extra_params, model_identifier),
-            )
+            include_thoughts = bool(extra_params.get("include_thoughts", True))
+            thinking_level = extra_params.get("thinking_level")
+            requires_thinking_level = _requires_thinking_level(model_identifier)
+            # Gemini 4 系列只接受 thinking_level；其它模型显式指定 thinking_level 时也优先使用。
+            if requires_thinking_level or thinking_level is not None:
+                if "thinking_budget" in extra_params:
+                    if requires_thinking_level:
+                        logger.warning(
+                            f"模型 {model_identifier} 不支持 thinking_budget，已忽略；请改用 thinking_level"
+                        )
+                    else:
+                        logger.warning(
+                            f"模型 {model_identifier} 同时设置了 thinking_budget 和 thinking_level，已优先使用 thinking_level"
+                        )
+                thinking_config_payload: Dict[str, Any] = {"include_thoughts": include_thoughts}
+                if thinking_level is not None:
+                    thinking_config_payload["thinking_level"] = thinking_level
+                config_payload["thinking_config"] = ThinkingConfig(**thinking_config_payload)
+            else:
+                config_payload["thinking_config"] = ThinkingConfig(
+                    include_thoughts=include_thoughts,
+                    thinking_budget=self.clamp_thinking_budget(extra_params, model_identifier),
+                )
 
         tools = _build_tools(tool_options) if tool_options else []
         if enable_google_search:
